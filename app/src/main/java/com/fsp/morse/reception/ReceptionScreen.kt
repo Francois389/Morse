@@ -1,4 +1,4 @@
-package com.fsp.morse
+package com.fsp.morse.reception
 
 import android.content.Context
 import android.os.Build
@@ -24,13 +24,23 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.fsp.morse.LETTER_TIMEOUT_MS
+import com.fsp.morse.LONG_PRESS_THRESHOLD_MS
+import com.fsp.morse.WORD_TIMEOUT_MS
+import com.fsp.morse.morseCodeMap
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -40,7 +50,7 @@ fun ReceptionScreen(modifier: Modifier = Modifier) {
     var decodedText by remember { mutableStateOf("") }
     var morseInputSequence by remember { mutableStateOf("") }
     var currentLetterMorse by remember { mutableStateOf("") }
-    var pressStartTime by remember { mutableStateOf(0L) }
+    var pressStartTime by remember { mutableLongStateOf(0L) }
     var inputTimeoutJob: Job? by remember { mutableStateOf(null) }
     var longPressVibrationJob: Job? by remember { mutableStateOf(null) }
     val coroutineScope = rememberCoroutineScope()
@@ -54,7 +64,8 @@ fun ReceptionScreen(modifier: Modifier = Modifier) {
         context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
     }
 
-    val invertedMorseCodeMap = remember { morseCodeMap.entries.associateBy({ it.value }) { it.key } }
+    val invertedMorseCodeMap =
+        remember { morseCodeMap.entries.associateBy({ it.value }) { it.key } }
 
     fun processNewSignal(signal: String) {
         inputTimeoutJob?.cancel() // Cancel previous timeout
@@ -101,7 +112,7 @@ fun ReceptionScreen(modifier: Modifier = Modifier) {
         modifier = modifier
             .fillMaxSize()
             .padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+        horizontalAlignment = Alignment.Companion.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Text("Texte Décodé:", style = MaterialTheme.typography.titleMedium)
@@ -109,7 +120,7 @@ fun ReceptionScreen(modifier: Modifier = Modifier) {
             value = decodedText,
             onValueChange = {},
             readOnly = true,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.Companion.fillMaxWidth(),
             minLines = 3
         )
 
@@ -118,12 +129,12 @@ fun ReceptionScreen(modifier: Modifier = Modifier) {
             value = morseInputSequence,
             onValueChange = {},
             readOnly = true,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.Companion.fillMaxWidth(),
             minLines = 2
         )
 
         Box(
-            modifier = Modifier
+            modifier = Modifier.Companion
                 .fillMaxWidth()
                 .height(100.dp)
                 .background(MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(8.dp))
@@ -139,7 +150,12 @@ fun ReceptionScreen(modifier: Modifier = Modifier) {
                                 delay(LONG_PRESS_THRESHOLD_MS)
                                 Log.d("ReceptionScreen", "Long press threshold reached, vibrating.")
                                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                    vibrator.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE))
+                                    vibrator.vibrate(
+                                        VibrationEffect.createOneShot(
+                                            50,
+                                            VibrationEffect.DEFAULT_AMPLITUDE
+                                        )
+                                    )
                                 } else {
                                     @Suppress("DEPRECATION")
                                     vibrator.vibrate(50)
@@ -150,7 +166,8 @@ fun ReceptionScreen(modifier: Modifier = Modifier) {
                                 tryAwaitRelease() // Wait for the press to be released
                                 longPressVibrationJob?.cancel() // Press released, cancel vibration job regardless of state
                                 val pressDuration = System.currentTimeMillis() - pressStartTime
-                                val signal = if (pressDuration < LONG_PRESS_THRESHOLD_MS) "." else "-"
+                                val signal =
+                                    if (pressDuration < LONG_PRESS_THRESHOLD_MS) "." else "-"
                                 Log.d("ReceptionScreen", "Signal: $signal ($pressDuration ms)")
                                 processNewSignal(signal)
                             } catch (e: GestureCancellationException) {
@@ -160,17 +177,17 @@ fun ReceptionScreen(modifier: Modifier = Modifier) {
                         }
                     )
                 },
-            contentAlignment = Alignment.Center
+            contentAlignment = Alignment.Companion.Center
         ) {
             Text(
                 text = "Appuyer pour Morse \n(Court = . / Long = -)",
-                textAlign = TextAlign.Center,
+                textAlign = TextAlign.Companion.Center,
                 color = MaterialTheme.colorScheme.onPrimary
             )
         }
 
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.Companion.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
             Button(
@@ -196,16 +213,19 @@ fun ReceptionScreen(modifier: Modifier = Modifier) {
                         } else {
                             // Last thing added was a letter
                             val lastChar = decodedText.last()
-                            val morseForLastChar = morseCodeMap[lastChar.toString().uppercase().get(0)]
+                            val morseForLastChar =
+                                morseCodeMap[lastChar.toString().uppercase().get(0)]
                             decodedText = decodedText.dropLast(1) // remove char from decoded text
 
                             if (morseForLastChar != null) {
                                 if (morseInputSequence.endsWith("$morseForLastChar / ")) {
-                                    morseInputSequence = morseInputSequence.removeSuffix("$morseForLastChar / ")
+                                    morseInputSequence =
+                                        morseInputSequence.removeSuffix("$morseForLastChar / ")
                                 } else if (morseInputSequence.endsWith(morseForLastChar)) {
-                                     // Fallback for cases like a single letter without trailing " / "
-                                     // (should ideally not happen if processNewSignal is consistent)
-                                     morseInputSequence = morseInputSequence.removeSuffix(morseForLastChar)
+                                    // Fallback for cases like a single letter without trailing " / "
+                                    // (should ideally not happen if processNewSignal is consistent)
+                                    morseInputSequence =
+                                        morseInputSequence.removeSuffix(morseForLastChar)
                                 }
                             }
                         }
@@ -216,7 +236,7 @@ fun ReceptionScreen(modifier: Modifier = Modifier) {
                 Text("Corriger")
             }
 
-            Spacer(modifier = Modifier.width(8.dp)) // Optional: add some space between buttons
+            Spacer(modifier = Modifier.Companion.width(8.dp)) // Optional: add some space between buttons
 
             Button(onClick = {
                 inputTimeoutJob?.cancel()

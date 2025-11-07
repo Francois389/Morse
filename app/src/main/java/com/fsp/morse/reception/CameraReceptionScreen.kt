@@ -1,12 +1,13 @@
-package com.fsp.morse
+package com.fsp.morse.reception
 
 import android.Manifest
-import android.content.Context
+import android.content.pm.PackageManager
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
@@ -17,21 +18,31 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import java.util.concurrent.Executors
 
 @Composable
 fun CameraReceptionScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
-    var hasCameraPermission by remember { mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED) }
+    var hasCameraPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.CAMERA
+            ) == PackageManager.PERMISSION_GRANTED
+        )
+    }
     val cameraPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
@@ -48,7 +59,9 @@ fun CameraReceptionScreen(modifier: Modifier = Modifier) {
         }
     }
 
-    Column(modifier = modifier.fillMaxSize().padding(16.dp)) {
+    Column(modifier = modifier
+        .fillMaxSize()
+        .padding(16.dp)) {
         Text("Réception par Caméra (Expérimental)", style = MaterialTheme.typography.titleMedium)
 
         if (hasCameraPermission) {
@@ -98,7 +111,7 @@ fun CameraPreview(
             val cameraProvider = cameraProviderFuture.get()
             cameraProvider.unbindAll() // Détacher les cas d'utilisation précédents
             val preview = Preview.Builder().build().also {
-                it.setSurfaceProvider(previewView.surfaceProvider)
+                it.surfaceProvider = previewView.surfaceProvider
             }
             cameraProvider.bindToLifecycle(
                 lifecycleOwner,
@@ -116,11 +129,12 @@ fun CameraPreview(
 
 // Analyseur simple de luminosité (moyenne des pixels)
 private class LuminosityAnalyzer(private val listener: (Double) -> Unit) : ImageAnalysis.Analyzer {
-    override fun analyze(image: androidx.camera.core.ImageProxy) {
+    override fun analyze(image: ImageProxy) {
         val buffer = image.planes[0].buffer
         val data = ByteArray(buffer.remaining())
         buffer.get(data)
-        val luma = data.map { it.toInt() and 0xFF }.average() // Calcul simple de la moyenne des pixels
+        val luma =
+            data.map { it.toInt() and 0xFF }.average() // Calcul simple de la moyenne des pixels
         listener(luma)
         image.close()
     }
