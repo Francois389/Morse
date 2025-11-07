@@ -13,3 +13,7 @@
 .externalNativeBuild
 .cxx
 local.properties
+.idea/deviceManager.xml
+.idea/studiobot.xml
+app/release
+.idea/appInsightsSettings.xml
