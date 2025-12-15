@@ -21,6 +21,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -44,7 +45,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlin.text.format
+
+const val TAG = "FlashlightScreen"
+
 
 fun translateToMorse(text: String): String {
     val words = text.uppercase().split(" ")
@@ -99,7 +102,8 @@ internal suspend fun performMorseTransmission(
                         onTorchVisualStateChange(false)
                         try {
                             cameraManager.setTorchMode(cameraId, false)
-                        } catch (_: Exception) { /* ignore nested */ }
+                        } catch (_: Exception) { /* ignore nested */
+                        }
                         throw e // Re-throw to be handled by the caller's coroutine
                     }
 
@@ -121,14 +125,16 @@ internal suspend fun performMorseTransmission(
         onTorchVisualStateChange(false) // Ensure visual state is off
         try {
             cameraManager.setTorchMode(cameraId, false) // Ensure torch is off
-        } catch (_: Exception) { /* ignore nested */ }
+        } catch (_: Exception) { /* ignore nested */
+        }
         throw e // Re-throw to be handled by the caller
     } catch (e: Exception) { // Catch other exceptions like InterruptedException if coroutine is cancelled
         Log.e("FlashlightScreen", "performMorseTransmission caught other Exception", e)
         onTorchVisualStateChange(false) // Ensure visual state is off
         try {
             cameraManager.setTorchMode(cameraId, false) // Ensure torch is off
-        } catch (_: Exception) { /* ignore nested */ }
+        } catch (_: Exception) { /* ignore nested */
+        }
         throw e // Re-throw to be handled by the caller
     }
 }
@@ -166,18 +172,93 @@ fun FlashlightScreen(modifier: Modifier = Modifier) {
         }
     }
 
+
+    val startTransmitting = {
+        val currentCameraId = cameraId
+        if (currentCameraId != null && morseResult.isNotBlank()) {
+            transmissionJob = coroutineScope.launch {
+                isTransmitting = true
+                try {
+                    performMorseTransmission(
+                        morseCodeToTransmit = morseResult,
+                        cameraManager = cameraManager,
+                        cameraId = currentCameraId,
+                        onTorchVisualStateChange = { visualState ->
+                            torchVisualState = visualState
+                        },
+                        speedMultiplier = speedMultiplier
+                    )
+                } catch (e: Exception) {
+                    if (e is CancellationException) {
+
+                        Log.i("FlashlightScreen", "Transmission cancelled by user.")
+                        // Make sure visual state is off if transmission is cancelled.
+                        torchVisualState = false
+                        try {
+                            cameraManager.setTorchMode(currentCameraId, false)
+                        } catch (_: Exception) {
+                        }
+                        // No need to re-throw if it's a cancellation initiated by the user
+                    } else {
+                        Log.e(
+                            "FlashlightScreen",
+                            "Transmission failed or was interrupted",
+                            e
+                        )
+                        torchVisualState = false // Ensure visual state is off
+                        try {
+                            cameraManager.setTorchMode(
+                                currentCameraId,
+                                false
+                            ) // Ensure torch is off
+                        } catch (ex: CameraAccessException) {
+                            Log.e(
+                                "FlashlightScreen",
+                                "Error turning off torch in Button's catch block",
+                                ex
+                            )
+                        }
+                    }
+                } finally {
+                    isTransmitting = false
+                    torchVisualState = false // Also reset here for safety
+                    transmissionJob = null
+                    try { // Final attempt to turn off torch
+                        cameraManager.setTorchMode(currentCameraId, false)
+                    } catch (_: CameraAccessException) {
+                        // Log.e("FlashlightScreen", "Error turning off torch in Button's finally block", e)
+                        // Avoid logging if already off or other minor issues after cancellation/completion
+                    }
+                }
+            }
+        }
+    }
+
+    val stopTransmission = {
+        if (isTransmitting && transmissionJob?.isActive == true) {
+            transmissionJob?.cancel()
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            Log.d(TAG, "FlashlightScreen: onDispose transmissionJob = $transmissionJob")
+            stopTransmission()
+        }
+    }
+
     Column(
         modifier = modifier
             .padding(16.dp)
             .fillMaxSize(),
-        horizontalAlignment = Alignment.Companion.CenterHorizontally,
+        horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         TextField(
             value = textToTranslate,
             onValueChange = { textToTranslate = it },
             label = { Text("Entrez le texte à traduire") },
-            modifier = Modifier.Companion.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth(),
             readOnly = isTransmitting
         )
 
@@ -185,11 +266,11 @@ fun FlashlightScreen(modifier: Modifier = Modifier) {
             value = morseResult,
             onValueChange = {},
             label = { Text("Code Morse") },
-            modifier = Modifier.Companion.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth(),
             readOnly = true
         )
 
-        Spacer(modifier = Modifier.Companion.height(10.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
         // Speed Control
         Text("Vitesse de transmission: x${"%.2f".format(1 / speedMultiplier)}")
@@ -199,10 +280,10 @@ fun FlashlightScreen(modifier: Modifier = Modifier) {
             valueRange = 0.25f..2.0f, // 0.25f (4x speed) to 2.0f (0.5x speed)
             steps = 6, // (2.0 - 0.25) / 0.25 = 7 intervals = 6 steps
             enabled = !isTransmitting,
-            modifier = Modifier.Companion.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth()
         )
         Row(
-            modifier = Modifier.Companion.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text("Rapide (x4.0)")
@@ -210,108 +291,46 @@ fun FlashlightScreen(modifier: Modifier = Modifier) {
         }
 
 
-        Spacer(modifier = Modifier.Companion.height(10.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
         if (isTransmitting) {
             Button(
-                onClick = {
-                    transmissionJob?.cancel()
-                    // The finally block in the coroutine will handle cleanup
-                },
-                modifier = Modifier.Companion.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = Color.Companion.Red)
+                onClick = stopTransmission,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
             ) {
                 Text("Arrêter Transmission")
             }
         } else {
             Button(
-                onClick = {
-                    val currentCameraId = cameraId
-                    if (currentCameraId != null && morseResult.isNotBlank()) {
-                        transmissionJob = coroutineScope.launch {
-                            isTransmitting = true
-                            try {
-                                performMorseTransmission(
-                                    morseCodeToTransmit = morseResult,
-                                    cameraManager = cameraManager,
-                                    cameraId = currentCameraId,
-                                    onTorchVisualStateChange = { visualState ->
-                                        torchVisualState = visualState
-                                    },
-                                    speedMultiplier = speedMultiplier
-                                )
-                            } catch (e: Exception) {
-                                if (e is CancellationException) {
-                                    Log.i("FlashlightScreen", "Transmission cancelled by user.")
-                                    // Make sure visual state is off if transmission is cancelled.
-                                    torchVisualState = false
-                                    try {
-                                        cameraManager.setTorchMode(currentCameraId, false)
-                                    } catch (_: Exception) {
-                                    }
-                                    // No need to re-throw if it's a cancellation initiated by the user
-                                } else {
-                                    Log.e(
-                                        "FlashlightScreen",
-                                        "Transmission failed or was interrupted",
-                                        e
-                                    )
-                                    torchVisualState = false // Ensure visual state is off
-                                    try {
-                                        cameraManager.setTorchMode(
-                                            currentCameraId,
-                                            false
-                                        ) // Ensure torch is off
-                                    } catch (ex: CameraAccessException) {
-                                        Log.e(
-                                            "FlashlightScreen",
-                                            "Error turning off torch in Button's catch block",
-                                            ex
-                                        )
-                                    }
-                                }
-                            } finally {
-                                isTransmitting = false
-                                torchVisualState = false // Also reset here for safety
-                                transmissionJob = null
-                                try { // Final attempt to turn off torch
-                                    cameraManager.setTorchMode(currentCameraId, false)
-                                } catch (e: CameraAccessException) {
-                                    // Log.e("FlashlightScreen", "Error turning off torch in Button's finally block", e)
-                                    // Avoid logging if already off or other minor issues after cancellation/completion
-                                }
-                            }
-                        }
-                    }
-                },
+                onClick = startTransmitting,
                 enabled = cameraId != null && morseResult.isNotBlank(),
-                modifier = Modifier.Companion.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth()
             ) {
                 Text("Transmettre")
             }
         }
 
-        Spacer(modifier = Modifier.Companion.height(16.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
         val indicatorText = if (torchVisualState) "Lampe : Allumée" else "Lampe : Éteinte"
-        val backgroundColor =
-            if (torchVisualState) Color.Companion.Yellow else Color.Companion.DarkGray
-        val textColor = if (torchVisualState) Color.Companion.Black else Color.Companion.White
+        val backgroundColor = if (torchVisualState) Color.Yellow else Color.DarkGray
+        val textColor = if (torchVisualState) Color.Black else Color.White
 
         Text(
             text = indicatorText,
             color = textColor,
-            modifier = Modifier.Companion
+            modifier = Modifier
                 .fillMaxWidth()
                 .background(backgroundColor)
                 .padding(8.dp),
-            textAlign = TextAlign.Companion.Center
+            textAlign = TextAlign.Center
         )
 
         if (cameraId == null) {
             Text(
                 "Lampe torche non disponible ou non trouvée.",
-                color = Color.Companion.Red,
+                color = Color.Red,
                 style = MaterialTheme.typography.bodySmall
             )
         }
