@@ -58,6 +58,17 @@ fun translateToMorse(text: String): String {
     }
 }
 
+private const val DOT = '.'
+private const val DASH = '-'
+
+enum class Action {
+    DOT,
+    DASH,
+    PAUSE_INTRA_CHAR,
+    PAUSE_INTER_LETTER,
+    PAUSE_INTER_WORD
+}
+
 internal suspend fun performMorseTransmission(
     morseCodeToTransmit: String,
     cameraManager: CameraManager,
@@ -65,78 +76,88 @@ internal suspend fun performMorseTransmission(
     onTorchVisualStateChange: (Boolean) -> Unit,
     speedMultiplier: Float
 ) {
-    try {
-        val words = morseCodeToTransmit.split("//")
-        for ((wordIndex, word) in words.withIndex()) {
-            if (word.isEmpty() && words.size > 1) { // Handle potential empty strings from multiple separators
-                if (wordIndex < words.size - 1) delay((PAUSE_INTER_WORD * speedMultiplier).toLong())
-                continue
-            }
-            val letters = word.split("/")
-            for ((letterIndex, letter) in letters.withIndex()) {
-                if (letter.isEmpty() && letters.size > 1) {
-                    if (letterIndex < letters.size - 1) delay((PAUSE_INTER_LETTER * speedMultiplier).toLong())
-                    continue
-                }
-                for ((signalIndex, signalChar) in letter.withIndex()) {
-                    try { // Inner try for individual signal torch ops
-                        when (signalChar) {
-                            '.' -> {
-                                onTorchVisualStateChange(true)
-                                cameraManager.setTorchMode(cameraId, true)
-                                delay((DOT_DURATION * speedMultiplier).toLong())
-                                onTorchVisualStateChange(false)
-                                cameraManager.setTorchMode(cameraId, false)
-                            }
+    val actions: MutableList<Action> = emptyList<Action>().toMutableList()
+    val words = morseCodeToTransmit
+        .split("//")
+        .filter { it.isNotEmpty() } // Handle potential empty strings from multiple separators
 
-                            '-' -> {
-                                onTorchVisualStateChange(true)
-                                cameraManager.setTorchMode(cameraId, true)
-                                delay((DASH_DURATION * speedMultiplier).toLong())
-                                onTorchVisualStateChange(false)
-                                cameraManager.setTorchMode(cameraId, false)
-                            }
-                        }
-                    } catch (e: CameraAccessException) {
-                        Log.e("FlashlightScreen", "Error setting torch mode for signal", e)
-                        onTorchVisualStateChange(false)
-                        try {
-                            cameraManager.setTorchMode(cameraId, false)
-                        } catch (_: Exception) { /* ignore nested */
-                        }
-                        throw e // Re-throw to be handled by the caller's coroutine
-                    }
+    words.forEachIndexed { wordIndex, word ->
+        val isLastWord = wordIndex == words.size - 1
+        val letters = word.split("/")
+            .filter { it.isNotEmpty() }
 
-                    if (signalIndex < letter.length - 1) {
-                        delay((PAUSE_INTRA_CHAR * speedMultiplier).toLong())
-                    }
-                }
-                if (letterIndex < letters.size - 1) {
-                    delay((PAUSE_INTER_LETTER * speedMultiplier).toLong())
+        letters.forEachIndexed { letterIndex, letter ->
+            val isLastLetter = letterIndex == letters.size - 1
+
+            letter.forEachIndexed { signalIndex, signalChar ->
+                actions.add(when (signalChar) {
+                    DOT -> Action.DOT
+                    DASH -> Action.DASH
+                    else -> throw IllegalArgumentException("Invalid signal character: $signalChar")
+                })
+                performFlash(
+                    signalChar,
+                    onTorchVisualStateChange,
+                    cameraManager,
+                    cameraId,
+                    speedMultiplier
+                )
+
+                val isLastSignal = signalIndex == letter.length - 1
+                if (!isLastSignal) {
+                    actions.add(Action.PAUSE_INTRA_CHAR)
+                    delay((PAUSE_INTRA_CHAR * speedMultiplier).toLong())
                 }
             }
-            if (wordIndex < words.size - 1) {
-                delay((PAUSE_INTER_WORD * speedMultiplier).toLong())
+            if (!isLastLetter) {
+                actions.add(Action.PAUSE_INTER_LETTER)
+                delay((PAUSE_INTER_LETTER * speedMultiplier).toLong())
             }
         }
-        onTorchVisualStateChange(false) // Ensure visual state is off at the end
-    } catch (e: CameraAccessException) {
-        Log.e("FlashlightScreen", "performMorseTransmission caught CameraAccessException", e)
-        onTorchVisualStateChange(false) // Ensure visual state is off
-        try {
-            cameraManager.setTorchMode(cameraId, false) // Ensure torch is off
-        } catch (_: Exception) { /* ignore nested */
+        if (!isLastWord) {
+            actions.add(Action.PAUSE_INTER_WORD)
+            delay((PAUSE_INTER_WORD * speedMultiplier).toLong())
+
         }
-        throw e // Re-throw to be handled by the caller
-    } catch (e: Exception) { // Catch other exceptions like InterruptedException if coroutine is cancelled
-        Log.e("FlashlightScreen", "performMorseTransmission caught other Exception", e)
-        onTorchVisualStateChange(false) // Ensure visual state is off
-        try {
-            cameraManager.setTorchMode(cameraId, false) // Ensure torch is off
-        } catch (_: Exception) { /* ignore nested */
-        }
-        throw e // Re-throw to be handled by the caller
     }
+    onTorchVisualStateChange(false) // Ensure visual state is off at the end
+}
+
+private suspend fun performFlash(
+    signalChar: Char,
+    onTorchVisualStateChange: (Boolean) -> Unit,
+    cameraManager: CameraManager,
+    cameraId: String,
+    speedMultiplier: Float
+) {
+    when (signalChar) {
+        DOT -> flash(
+            onTorchVisualStateChange,
+            cameraManager,
+            cameraId,
+            (DOT_DURATION * speedMultiplier).toLong()
+        )
+
+        DASH -> flash(
+            onTorchVisualStateChange,
+            cameraManager,
+            cameraId,
+            (DASH_DURATION * speedMultiplier).toLong()
+        )
+    }
+}
+
+private suspend fun flash(
+    onTorchVisualStateChange: (Boolean) -> Unit,
+    cameraManager: CameraManager,
+    cameraId: String,
+    delay: Long
+) {
+    onTorchVisualStateChange(true)
+    cameraManager.setTorchMode(cameraId, true)
+    delay(delay)
+    onTorchVisualStateChange(false)
+    cameraManager.setTorchMode(cameraId, false)
 }
 
 @Composable
@@ -188,37 +209,10 @@ fun FlashlightScreen(modifier: Modifier = Modifier) {
                         },
                         speedMultiplier = speedMultiplier
                     )
+                } catch (e: CancellationException) {
+                    Log.i(TAG, "Transmission cancelled by user.")
                 } catch (e: Exception) {
-                    if (e is CancellationException) {
-
-                        Log.i("FlashlightScreen", "Transmission cancelled by user.")
-                        // Make sure visual state is off if transmission is cancelled.
-                        torchVisualState = false
-                        try {
-                            cameraManager.setTorchMode(currentCameraId, false)
-                        } catch (_: Exception) {
-                        }
-                        // No need to re-throw if it's a cancellation initiated by the user
-                    } else {
-                        Log.e(
-                            "FlashlightScreen",
-                            "Transmission failed or was interrupted",
-                            e
-                        )
-                        torchVisualState = false // Ensure visual state is off
-                        try {
-                            cameraManager.setTorchMode(
-                                currentCameraId,
-                                false
-                            ) // Ensure torch is off
-                        } catch (ex: CameraAccessException) {
-                            Log.e(
-                                "FlashlightScreen",
-                                "Error turning off torch in Button's catch block",
-                                ex
-                            )
-                        }
-                    }
+                    Log.e(TAG, "Transmission failed or was interrupted", e)
                 } finally {
                     isTransmitting = false
                     torchVisualState = false // Also reset here for safety
