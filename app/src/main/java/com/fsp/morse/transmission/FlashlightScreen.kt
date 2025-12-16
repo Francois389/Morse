@@ -35,12 +35,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.fsp.morse.DASH
 import com.fsp.morse.DASH_DURATION
+import com.fsp.morse.DOT
 import com.fsp.morse.DOT_DURATION
 import com.fsp.morse.PAUSE_INTER_LETTER
 import com.fsp.morse.PAUSE_INTER_WORD
 import com.fsp.morse.PAUSE_INTRA_CHAR
-import com.fsp.morse.morseCodeMap
+import com.fsp.morse.translateToMorse
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -49,21 +51,9 @@ import kotlinx.coroutines.launch
 const val TAG = "FlashlightScreen"
 
 
-fun translateToMorse(text: String): String {
-    val words = text.uppercase().split(" ")
-    return words.joinToString(separator = "//") { word ->
-        word.mapNotNull { char ->
-            morseCodeMap[char]
-        }.joinToString(separator = "/")
-    }
-}
-
-private const val DOT = '.'
-private const val DASH = '-'
-
 enum class Action {
-    DOT,
-    DASH,
+    FLASH_DOT,
+    FLASH_DASH,
     PAUSE_INTRA_CHAR,
     PAUSE_INTER_LETTER,
     PAUSE_INTER_WORD
@@ -76,6 +66,32 @@ internal suspend fun performMorseTransmission(
     onTorchVisualStateChange: (Boolean) -> Unit,
     speedMultiplier: Float
 ) {
+    parseMorseToAction(morseCodeToTransmit)
+        .forEach { action ->
+            when (action) {
+                Action.FLASH_DOT -> flash(
+                    onTorchVisualStateChange,
+                    cameraManager,
+                    cameraId,
+                    (DOT_DURATION * speedMultiplier).toLong()
+                )
+
+                Action.FLASH_DASH -> flash(
+                    onTorchVisualStateChange,
+                    cameraManager,
+                    cameraId,
+                    (DASH_DURATION * speedMultiplier).toLong()
+                )
+
+                Action.PAUSE_INTRA_CHAR -> delay((PAUSE_INTRA_CHAR * speedMultiplier).toLong())
+                Action.PAUSE_INTER_LETTER -> delay((PAUSE_INTER_LETTER * speedMultiplier).toLong())
+                Action.PAUSE_INTER_WORD -> delay((PAUSE_INTER_WORD * speedMultiplier).toLong())
+            }
+        }
+    onTorchVisualStateChange(false) // Ensure visual state is off at the end
+}
+
+private fun parseMorseToAction(morseCodeToTransmit: String): List<Action> {
     val actions: MutableList<Action> = emptyList<Action>().toMutableList()
     val words = morseCodeToTransmit
         .split("//")
@@ -90,61 +106,27 @@ internal suspend fun performMorseTransmission(
             val isLastLetter = letterIndex == letters.size - 1
 
             letter.forEachIndexed { signalIndex, signalChar ->
-                actions.add(when (signalChar) {
-                    DOT -> Action.DOT
-                    DASH -> Action.DASH
-                    else -> throw IllegalArgumentException("Invalid signal character: $signalChar")
-                })
-                performFlash(
-                    signalChar,
-                    onTorchVisualStateChange,
-                    cameraManager,
-                    cameraId,
-                    speedMultiplier
+                actions.add(
+                    when (signalChar) {
+                        DOT -> Action.FLASH_DOT
+                        DASH -> Action.FLASH_DASH
+                        else -> throw IllegalArgumentException("Invalid signal character: $signalChar")
+                    }
                 )
-
                 val isLastSignal = signalIndex == letter.length - 1
                 if (!isLastSignal) {
                     actions.add(Action.PAUSE_INTRA_CHAR)
-                    delay((PAUSE_INTRA_CHAR * speedMultiplier).toLong())
                 }
             }
             if (!isLastLetter) {
                 actions.add(Action.PAUSE_INTER_LETTER)
-                delay((PAUSE_INTER_LETTER * speedMultiplier).toLong())
             }
         }
         if (!isLastWord) {
             actions.add(Action.PAUSE_INTER_WORD)
-            delay((PAUSE_INTER_WORD * speedMultiplier).toLong())
-
         }
     }
-    onTorchVisualStateChange(false) // Ensure visual state is off at the end
-}
-
-private suspend fun performFlash(
-    signalChar: Char,
-    onTorchVisualStateChange: (Boolean) -> Unit,
-    cameraManager: CameraManager,
-    cameraId: String,
-    speedMultiplier: Float
-) {
-    when (signalChar) {
-        DOT -> flash(
-            onTorchVisualStateChange,
-            cameraManager,
-            cameraId,
-            (DOT_DURATION * speedMultiplier).toLong()
-        )
-
-        DASH -> flash(
-            onTorchVisualStateChange,
-            cameraManager,
-            cameraId,
-            (DASH_DURATION * speedMultiplier).toLong()
-        )
-    }
+    return actions.toList()
 }
 
 private suspend fun flash(

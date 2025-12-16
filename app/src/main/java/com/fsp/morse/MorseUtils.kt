@@ -21,3 +21,14 @@ val morseCodeMap = mapOf(
     '1' to ".----", '2' to "..---", '3' to "...--", '4' to "....-", '5' to ".....",
     '6' to "-....", '7' to "--...",'8' to "---..", '9' to "----.", '0' to "-----"
 )
+fun translateToMorse(text: String): String {
+    val words = text.uppercase().split(" ")
+    return words.joinToString(separator = "//") { word ->
+        word.mapNotNull { char ->
+            morseCodeMap[char]
+        }.joinToString(separator = "/")
+    }
+}
+
+const val DOT = '.'
+const val DASH = '-'
