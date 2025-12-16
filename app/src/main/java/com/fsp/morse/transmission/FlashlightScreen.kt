@@ -91,8 +91,9 @@ internal suspend fun performMorseTransmission(
     onTorchVisualStateChange(false) // Ensure visual state is off at the end
 }
 
-private fun parseMorseToAction(morseCodeToTransmit: String): List<Action> {
-    val actions: MutableList<Action> = emptyList<Action>().toMutableList()
+fun parseMorseToAction(morseCodeToTransmit: String): List<Action> {
+    var actions: MutableList<Action> = emptyList<Action>().toMutableList()
+
     val words = morseCodeToTransmit
         .split("//")
         .filter { it.isNotEmpty() } // Handle potential empty strings from multiple separators
